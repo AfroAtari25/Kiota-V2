@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+:root {
+  --terracotta: #C1533A;
+  --cream: #F7F5EE;
+  --cream-card: #FCFBF8;
+  --forest: #3B5D42;
+  --ink: #2B2620;
+  --sand: #8A8072;
+}
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: #F7F5EE;
+    color: #2B2620;
+  }
+
+  .serif {
+    font-family: 'Playfair Display', 'Georgia', serif;
+  }
+
+  .sans {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+.card-shadow {
+  box-shadow: 0 4px 18px rgba(43, 38, 32, 0.05);
+}
+
+.card-shadow-hover:hover {
+  box-shadow: 0 10px 26px rgba(43, 38, 32, 0.10);
+}
+
+.blur-overlay {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background: rgba(43, 38, 32, 0.6);
+}
+
+/* Custom scrollbars for clean feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F7F5EE;
+}
+::-webkit-scrollbar-thumb {
+  background: #8A8072;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C1533A;
+}
+
+/* Fix leaflet pane z-indices so overlays and modals sit properly */
+.leaflet-pane {
+  z-index: 10 !important;
+}
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 20 !important;
+}
+
+/* Pulse animation for live capture indicators */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.15); }
+}
+
+.animate-live-pulse {
+  animation: live-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
