@@ -391,23 +391,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): User => {
     const normalizedInput = normalizeKenyanPhone(phone);
 
-    // Check if logging in as Super Admin (Isa Mohamed: 0741367051 / IsaMohamed92@gmail.com)
-    if (
-      normalizedInput === '0741367051' ||
-      phone.includes('741367051') ||
-      phone.toLowerCase().includes('isamohamed92@gmail.com') ||
-      name.toLowerCase().includes('isa mohamed') ||
-      name.toLowerCase().includes('isamohamed92@gmail.com')
-    ) {
-      let adminUser = users.find((u) => u.id === 'user-admin-isa' || u.role === 'admin');
-      if (!adminUser) {
-        adminUser = SEED_USERS[0];
-        setUsers((prev) => [adminUser!, ...prev]);
-      }
-      setCurrentUserId(adminUser.id);
-      setActiveTab('admin');
-      return adminUser;
-    }
+    
 
     // Check if phone matches any existing user
     const existing = users.find(
