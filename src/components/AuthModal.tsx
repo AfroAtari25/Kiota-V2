@@ -15,7 +15,6 @@ import {
   FileText,
   AlertCircle,
   Eye,
-  Crown,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -23,10 +22,11 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
-  const { loginWithPhone, users } = useApp();
+  const { requestEmailOtp, verifyEmailOtp } = useApp();
 
   const [step, setStep] = useState<'basic' | 'kyc_id' | 'kyc_face' | 'otp'>('basic');
-  const [phoneDigits, setPhoneDigits] = useState('741367051'); // Default to Isa Mohamed admin for testing or demo
+  const [phoneDigits, setPhoneDigits] = useState('');
+  const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<'seeker' | 'poster'>('poster');
   const [requiresKyc, setRequiresKyc] = useState<boolean>(true);
@@ -46,9 +46,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
   const [errorMsg, setErrorMsg] = useState('');
 
   const fullPhoneNumber = `+254 ${phoneDigits.trim()}`;
-  const isIsaAdminPhone =
-    normalizeKenyanPhone(phoneDigits) === '0741367051' ||
-    phoneDigits.includes('741367051');
 
   const SAMPLE_ID_FRONTS = [
     'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=600&auto=format&fit=crop&q=80',
@@ -98,25 +95,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
     }, 800);
   };
 
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+
+  /** Actually sends the real email OTP, then advances to the OTP step. */
+  const proceedToOtp = async () => {
+    setIsSendingOtp(true);
+    setErrorMsg('');
+    const result = await requestEmailOtp(email, name, fullPhoneNumber, role);
+    setIsSendingOtp(false);
+    if (!result.success) {
+      setErrorMsg(result.message);
+      return;
+    }
+    setStep('otp');
+  };
+
   const handleBasicSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!phoneDigits || phoneDigits.length < 8) {
       setErrorMsg('Please enter a valid Kenyan phone number (e.g. 0741367051 or 741367051).');
       return;
     }
-    setErrorMsg('');
-
-    // If it's the Admin phone, skip KYC requirement as Isa Mohamed is already Verified Super Admin
-    if (isIsaAdminPhone) {
-      setStep('otp');
+    if (!email || !email.includes('@')) {
+      setErrorMsg('Please enter a valid email address — we\u2019ll send your login code there.');
       return;
     }
+    setErrorMsg('');
 
-    // If poster role or user opted for KYC verification to receive payouts
+    // Posters always go through KYC before they can receive payouts.
     if (role === 'poster' || requiresKyc) {
       setStep('kyc_id');
     } else {
-      setStep('otp');
+      proceedToOtp();
     }
   };
 
@@ -140,38 +150,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
       return;
     }
     setErrorMsg('');
-    setStep('otp');
+    proceedToOtp();
   };
 
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsVerifying(true);
-    setTimeout(() => {
-      loginWithPhone(fullPhoneNumber, name, role, {
-        nationalIdNumber,
-        idFrontUrl,
-        idBackUrl,
-        faceSelfieUrl,
-        faceLivenessScore,
-      });
-      setIsVerifying(false);
-      onClose();
-    }, 600);
+    setErrorMsg('');
+    const result = await verifyEmailOtp(email, otp, {
+      nationalIdNumber,
+      idFrontUrl,
+      idBackUrl,
+      faceSelfieUrl,
+      faceLivenessScore,
+    });
+    setIsVerifying(false);
+    if (!result.success) {
+      setErrorMsg(result.message);
+      return;
+    }
+    onClose();
   };
 
-  const handleQuickSelect = (
-    userPhone: string,
-    userName: string,
-    userRole: 'seeker' | 'poster' | 'admin'
-  ) => {
+  const handleQuickSelect = (userPhone: string, userName: string, userRole: 'seeker' | 'poster') => {
     const raw = userPhone.replace('+254', '').trim();
     setPhoneDigits(raw);
     setName(userName);
-    if (userRole === 'admin') {
-      setRole('poster');
-    } else {
-      setRole(userRole);
-    }
+    setRole(userRole);
   };
 
   return (
@@ -213,7 +218,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                   : 'bg-white/20'
               }`}
             />
-            {(role === 'poster' || requiresKyc) && !isIsaAdminPhone && (
+            {(role === 'poster' || requiresKyc) && (
               <>
                 <div
                   className={`h-1.5 flex-1 rounded-full ${
@@ -267,13 +272,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                     className="w-full px-3.5 py-3 text-sm font-semibold text-[#2B2620] focus:outline-hidden"
                   />
                 </div>
+              </div>
 
-                {isIsaAdminPhone && (
-                  <div className="mt-2 p-2.5 bg-amber-50 border border-amber-300 rounded-xl flex items-center space-x-2 text-xs text-amber-900 font-semibold">
-                    <Crown className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>Super Admin number recognized (Isa Mohamed). Full Admin Hub unlocked!</span>
-                  </div>
-                )}
+              {/* Email — this is where the real login code is sent */}
+              <div>
+                <label className="block text-xs font-bold text-[#2B2620] mb-1.5">
+                  Email address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full px-3.5 py-3 text-sm font-semibold text-[#2B2620] bg-white border border-[#8A8072]/30 rounded-xl focus:outline-hidden focus:border-[#3B5D42]"
+                />
+                <p className="mt-1 text-[11px] text-[#8A8072]">
+                  We'll send your one-time login code here (phone SMS OTP is coming soon).
+                </p>
               </div>
 
               {/* Full Name */}
@@ -341,7 +357,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
               </div>
 
               {/* KYC notice badge for posters */}
-              {role === 'poster' && !isIsaAdminPhone && (
+              {role === 'poster' && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start space-x-2 text-xs text-emerald-900">
                   <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                   <div>
@@ -353,28 +369,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                 </div>
               )}
 
-              {/* Quick Pick Accounts */}
+              {/* Quick Pick Accounts — dev/testing convenience only, remove before public launch */}
               <div className="pt-2 border-t border-[#8A8072]/15">
                 <div className="text-[11px] font-bold text-[#8A8072] uppercase tracking-wider mb-2 flex items-center justify-between">
                   <span>Quick Test Demo Profiles:</span>
                   <span className="text-[10px] text-[#3B5D42] font-semibold">Click to load</span>
                 </div>
                 <div className="space-y-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickSelect('0741367051', 'Isa Mohamed', 'admin')}
-                    className="w-full text-left px-3 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl text-xs flex items-center justify-between transition-colors"
-                  >
-                    <div>
-                      <div className="flex items-center space-x-1.5 font-bold text-[#2B2620]">
-                        <Crown className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Isa Mohamed (Super Admin)</span>
-                      </div>
-                      <div className="text-[10px] text-[#8A8072] font-mono">IsaMohamed92@gmail.com</div>
-                    </div>
-                    <span className="text-[#C1533A] font-mono font-bold text-[11px]">0741367051</span>
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => handleQuickSelect('0722345678', 'Wanjiku Mwangi', 'poster')}
@@ -397,9 +398,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
 
               <button
                 type="submit"
-                className="w-full py-3.5 bg-[#C1533A] hover:bg-[#a53709] text-white rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 transition-all shadow-md active:scale-98 mt-2"
+                disabled={isSendingOtp}
+                className="w-full py-3.5 bg-[#C1533A] hover:bg-[#a53709] text-white rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 transition-all shadow-md active:scale-98 mt-2 disabled:opacity-60"
               >
-                <span>{role === 'poster' && !isIsaAdminPhone ? 'Proceed to KYC ID Verification' : 'Send SMS OTP Code'}</span>
+                <span>
+                  {isSendingOtp
+                    ? 'Sending code...'
+                    : role === 'poster'
+                    ? 'Proceed to KYC ID Verification'
+                    : 'Send Email OTP Code'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
@@ -698,14 +706,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                   onClick={() => setStep('basic')}
                   className="hover:underline font-semibold text-[#2B2620]"
                 >
-                  Change phone number
+                  Change email
                 </button>
                 <button
                   type="button"
-                  onClick={() => setOtp('4829')}
-                  className="text-[#C1533A] font-bold hover:underline"
+                  onClick={proceedToOtp}
+                  disabled={isSendingOtp}
+                  className="text-[#C1533A] font-bold hover:underline disabled:opacity-50"
                 >
-                  Resend OTP
+                  {isSendingOtp ? 'Sending...' : 'Resend code'}
                 </button>
               </div>
 
@@ -719,11 +728,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>
-                      {isIsaAdminPhone
-                        ? 'Authenticate Super Admin & Open Admin Hub'
-                        : 'Verify & Enter Kiota'}
-                    </span>
+                    <span>Verify &amp; Enter Kiota</span>
                   </>
                 )}
               </button>
