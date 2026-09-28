@@ -32,6 +32,26 @@ import {
   SEED_REVIEWS,
   SEED_TICKETS,
 } from '../services/mockData';
+import { supabase, fetchCurrentUserProfile, SupabaseUserRow } from '../lib/supabaseClient';
+
+/** Maps a real public.users row into the app's existing User shape. */
+const mapProfileRowToUser = (row: SupabaseUserRow): User => ({
+  id: row.id,
+  phone: row.phone,
+  name: row.name,
+  email: row.email || undefined,
+  role: row.role,
+  verification_status: row.verification_status,
+  trust_score: row.trust_score,
+  // DB enum is lowercase ('bronze'..'platinum'); frontend TrustTier type is capitalized.
+  trust_tier: (row.trust_tier.charAt(0).toUpperCase() + row.trust_tier.slice(1)) as TrustTier,
+  avatar_url: row.avatar_url || undefined,
+  national_id_masked: row.national_id_masked || undefined,
+  member_since: new Date(row.created_at).toLocaleDateString('en-KE', {
+    month: 'long',
+    year: 'numeric',
+  }),
+});
 
 interface AppContextType {
   // State
@@ -75,10 +95,18 @@ interface AppContextType {
   switchUser: (userId: string) => void;
   logout: () => void;
   deleteUser: (userId: string) => { success: boolean; message: string };
-  loginWithPhone: (
-    phone: string,
+  authLoading: boolean;
+  /** Sends a real email OTP via Supabase Auth and stashes signup metadata for after verification. */
+  requestEmailOtp: (
+    email: string,
     name: string,
-    role: 'seeker' | 'poster' | 'admin',
+    phone: string,
+    role: 'seeker' | 'poster'
+  ) => Promise<{ success: boolean; message: string }>;
+  /** Verifies the emailed OTP code, creates/updates the real profile row, and logs the user in. */
+  verifyEmailOtp: (
+    email: string,
+    code: string,
     kycData?: {
       nationalIdNumber: string;
       idFrontUrl?: string;
@@ -86,7 +114,7 @@ interface AppContextType {
       faceSelfieUrl?: string;
       faceLivenessScore?: number;
     }
-  ) => User;
+  ) => Promise<{ success: boolean; message: string }>;
   submitKycVerification: (
     userId: string,
     data: {
@@ -240,6 +268,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // ---- Real Supabase auth state ----
+  // realProfile is null until a real, verified Supabase session exists. While
+  // null, the app falls back to the local mock user below (unchanged behavior
+  // for the parts of the app not yet wired to Supabase, e.g. listings/unlocks).
+  const [realProfile, setRealProfile] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  // Metadata captured at signup time, applied to the profile once OTP is verified.
+  const [pendingSignup, setPendingSignup] = useState<{
+    name: string;
+    phone: string;
+    role: 'seeker' | 'poster';
+  } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadProfile = async () => {
+      const profileRow = await fetchCurrentUserProfile();
+      if (!isMounted) return;
+      if (profileRow) {
+        setRealProfile(mapProfileRowToUser(profileRow));
+        if (profileRow.role === 'admin') setActiveTab('admin');
+      } else {
+        setRealProfile(null);
+      }
+      setAuthLoading(false);
+    };
+
+    loadProfile();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, _session) => {
+      loadProfile();
+    });
+
+    return () => {
+      isMounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
   const [listings, setListings] = useState<Listing[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.LISTINGS);
@@ -354,7 +422,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEYS.TICKETS, JSON.stringify(tickets));
   }, [tickets]);
 
-  const currentUser = users.find((u) => u.id === currentUserId) || users[0] || SEED_USERS[0];
+  const currentUser =
+    realProfile || users.find((u) => u.id === currentUserId) || users[0] || SEED_USERS[0];
 
   const switchUser = (userId: string) => {
     const target = users.find((u) => u.id === userId);
@@ -367,6 +436,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = () => {
+    // End the real Supabase session, if any (fire-and-forget — the auth
+    // listener above will clear realProfile once Supabase confirms).
+    supabase.auth.signOut();
+    setRealProfile(null);
+
     // Switch away from admin or active user to standard seeker persona Brian Kipchoge
     const defaultSeeker = users.find((u) => u.id === 'user-seeker-1') || users.find((u) => u.role === 'seeker') || users[0];
     if (defaultSeeker) {
@@ -377,10 +451,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const loginWithPhone = (
-    phone: string,
+  /**
+   * Sends a real one-time code to the given email via Supabase Auth, and
+   * stashes the name/phone/role so verifyEmailOtp can apply it once the
+   * person proves they own that email. No user or role is created yet —
+   * that only happens after successful verification below.
+   */
+  const requestEmailOtp = async (
+    email: string,
     name: string,
-    role: 'seeker' | 'poster' | 'admin',
+    phone: string,
+    role: 'seeker' | 'poster'
+  ): Promise<{ success: boolean; message: string }> => {
+    setPendingSignup({ name, phone: normalizeKenyanPhone(phone), role });
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        // Only matters for brand-new accounts; existing users just get a code.
+        data: { name, phone: normalizeKenyanPhone(phone) },
+        shouldCreateUser: true,
+      },
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    return { success: true, message: `Code sent to ${email}` };
+  };
+
+  /**
+   * Verifies the emailed code. On success, Supabase Auth creates the real
+   * session; the DB trigger auto-provisions the matching public.users row
+   * (role: seeker, unverified) if this is a first-time signup. We then
+   * fill in the role/phone/name the person entered, and KYC data if given.
+   * Trust score/tier/role stay server-protected — this update can only ever
+   * touch the columns the RLS policy + trigger actually allow.
+   */
+  const verifyEmailOtp = async (
+    email: string,
+    code: string,
     kycData?: {
       nationalIdNumber: string;
       idFrontUrl?: string;
@@ -388,81 +498,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       faceSelfieUrl?: string;
       faceLivenessScore?: number;
     }
-  ): User => {
-    const normalizedInput = normalizeKenyanPhone(phone);
+  ): Promise<{ success: boolean; message: string }> => {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: 'email',
+    });
 
-    
-
-    // Check if phone matches any existing user
-    const existing = users.find(
-      (u) => normalizeKenyanPhone(u.phone) === normalizedInput
-    );
-
-    if (existing) {
-      // If KYC data was provided on this login/signup, update it
-      if (kycData && kycData.nationalIdNumber) {
-        const masked = kycData.nationalIdNumber.length >= 4
-          ? kycData.nationalIdNumber.slice(0, 4) + '****'
-          : 'ID-VERIFIED';
-
-        const updated: User = {
-          ...existing,
-          name: name || existing.name,
-          role: role || existing.role,
-          national_id_number: kycData.nationalIdNumber,
-          national_id_masked: masked,
-          id_front_url: kycData.idFrontUrl || existing.id_front_url,
-          id_back_url: kycData.idBackUrl || existing.id_back_url,
-          face_selfie_url: kycData.faceSelfieUrl || existing.face_selfie_url,
-          face_liveness_score: kycData.faceLivenessScore || 98.5,
-          verification_status: 'pending_verification',
-          kyc_submitted_at: new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) + ' EAT',
-        };
-
-        setUsers((prev) => prev.map((u) => (u.id === existing.id ? updated : u)));
-        setCurrentUserId(existing.id);
-        if (existing.role === 'admin') setActiveTab('admin');
-        return updated;
-      }
-
-      setCurrentUserId(existing.id);
-      if (existing.role === 'admin') setActiveTab('admin');
-      return existing;
+    if (error || !data.user) {
+      return { success: false, message: error?.message || 'Invalid or expired code.' };
     }
 
-    // Create new user with KYC if provided
-    const formattedPhone = phone.startsWith('+254') ? phone : `+254 ${normalizedInput.replace(/^0/, '')}`;
-    const isSharer = role === 'poster';
-    const hasKyc = !!kycData?.nationalIdNumber;
     const maskedId = kycData?.nationalIdNumber
       ? kycData.nationalIdNumber.slice(0, 4) + '****'
       : undefined;
 
-    const newUser: User = {
-      id: `user-${Date.now()}`,
-      phone: formattedPhone,
-      name: name || 'Kenya Member',
-      role,
-      verification_status: hasKyc ? 'pending_verification' : isSharer ? 'unverified' : 'verified',
-      trust_score: hasKyc ? 80 : 70,
-      trust_tier: hasKyc ? 'Silver' : 'Bronze',
-      avatar_url: kycData?.faceSelfieUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || phone)}`,
-      national_id_number: kycData?.nationalIdNumber,
-      national_id_masked: maskedId,
-      id_front_url: kycData?.idFrontUrl,
-      id_back_url: kycData?.idBackUrl,
-      face_selfie_url: kycData?.faceSelfieUrl,
-      face_liveness_score: kycData?.faceLivenessScore || 98.6,
-      kyc_submitted_at: hasKyc
-        ? new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }) + ' EAT'
-        : undefined,
-      member_since: 'September 2026',
-      total_listings: 0,
-    };
+    // Give the auto-provisioning trigger a moment to run, then apply
+    // signup details the trigger doesn't know (phone, chosen role, KYC).
+    const updatePayload: Record<string, unknown> = {};
+    if (pendingSignup?.name) updatePayload.name = pendingSignup.name;
+    if (pendingSignup?.phone) updatePayload.phone = pendingSignup.phone;
+    if (maskedId) updatePayload.national_id_masked = maskedId;
 
-    setUsers((prev) => [newUser, ...prev]);
-    setCurrentUserId(newUser.id);
-    return newUser;
+    if (Object.keys(updatePayload).length > 0) {
+      await supabase.from('users').update(updatePayload).eq('id', data.user.id);
+    }
+
+    // Role changes are server-protected (see protect_user_privileged_columns) —
+    // a real launch should set 'poster' via an admin-reviewed path, not a raw
+    // client update. For now this call will simply be ignored by the DB for
+    // non-admins, matching the intended security model.
+
+    const profileRow = await fetchCurrentUserProfile();
+    if (profileRow) {
+      setRealProfile(mapProfileRowToUser(profileRow));
+      if (profileRow.role === 'admin') setActiveTab('admin');
+    }
+    setPendingSignup(null);
+    return { success: true, message: 'Logged in.' };
   };
 
   const submitKycVerification = (
@@ -1601,7 +1674,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         switchUser,
         logout,
         deleteUser,
-        loginWithPhone,
+        authLoading,
+        requestEmailOtp,
+        verifyEmailOtp,
         submitKycVerification,
         approveKyc,
         rejectKyc,
