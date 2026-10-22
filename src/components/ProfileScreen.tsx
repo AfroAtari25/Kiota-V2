@@ -195,6 +195,7 @@ export const ProfileScreen: React.FC = () => {
       </div>
 
       {/* Switch Persona / Demo Testing */}
+{import.meta.env.DEV && (
       <div className="bg-white rounded-3xl p-5 border border-[#2B2620]/15 card-shadow space-y-3">
         <h2 className="serif text-sm font-bold text-[#2B2620]">
           Switch Persona (Testing)
@@ -235,8 +236,9 @@ export const ProfileScreen: React.FC = () => {
           ))}
         </div>
       </div>
+)}
 
-      {/* Reset Seed Data */}
+{import.meta.env.DEV && (
       <div className="flex justify-center pt-2">
         <button
           onClick={resetToDefaults}
@@ -246,6 +248,8 @@ export const ProfileScreen: React.FC = () => {
           <span>Reset Demo Store to Initial State</span>
         </button>
       </div>
+)}
+
     </div>
   );
 };

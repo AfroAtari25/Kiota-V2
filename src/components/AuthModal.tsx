@@ -370,6 +370,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
               )}
 
               {/* Quick Pick Accounts — dev/testing convenience only, remove before public launch */}
+{import.meta.env.DEV && (
               <div className="pt-2 border-t border-[#8A8072]/15">
                 <div className="text-[11px] font-bold text-[#8A8072] uppercase tracking-wider mb-2 flex items-center justify-between">
                   <span>Quick Test Demo Profiles:</span>
@@ -395,6 +396,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                   </button>
                 </div>
               </div>
+)}
 
               <button
                 type="submit"

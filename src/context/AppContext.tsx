@@ -214,13 +214,13 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  USERS: 'kiota_users_v5',
-  CURRENT_USER_ID: 'kiota_current_user_v5',
-  LISTINGS: 'kiota_listings_v5',
-  MEDIA: 'kiota_media_v5',
-  UNLOCKS: 'kiota_unlocks_v5',
-  PAYOUTS: 'kiota_payouts_v5',
-  REVIEWS: 'kiota_reviews_v5',
+  USERS: 'kiota_users_v6',
+  CURRENT_USER_ID: 'kiota_current_user_v6',
+  LISTINGS: 'kiota_listings_v6',
+  MEDIA: 'kiota_media_v6',
+  UNLOCKS: 'kiota_unlocks_v6',
+  PAYOUTS: 'kiota_payouts_v6',
+  REVIEWS: 'kiota_reviews_v6',
   ECONOMICS_CONFIG: 'kiota_economics_config_v1',
   TICKETS: 'kiota_tickets_v1',
 };
@@ -247,10 +247,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const saved = localStorage.getItem(STORAGE_KEYS.USERS);
       if (saved) {
         const parsed: User[] = JSON.parse(saved);
-        // Ensure Isa Mohamed admin exists
-        if (!parsed.some((u) => u.id === 'user-admin-isa' || u.email?.toLowerCase() === 'isamohamed92@gmail.com')) {
-          return [SEED_USERS[0], ...parsed];
-        }
         return parsed;
       }
       return SEED_USERS;
@@ -262,9 +258,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUserId, setCurrentUserId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-      return saved || 'user-admin-isa'; // Default to Isa Mohamed or first
+      return saved || 'user-seeker-1'; // Never default to an admin persona
     } catch {
-      return 'user-admin-isa';
+      return 'user-seeker-1';
     }
   });
 
@@ -427,7 +423,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const switchUser = (userId: string) => {
     const target = users.find((u) => u.id === userId);
-    if (target) {
+    // Mock personas can never be admins; only a real Supabase admin session grants that.
+    if (target && target.role !== 'admin') {
       setCurrentUserId(target.id);
       if (target.role !== 'admin' && activeTab === 'admin') {
         setActiveTab('browse');
@@ -862,7 +859,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If currently logged into this deleted user, fallback safely to admin or default
     if (currentUserId === userId) {
-      setCurrentUserId('user-admin-isa');
+      setCurrentUserId('user-seeker-1');
       setActiveTab('admin');
     }
 
@@ -1637,7 +1634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const resetToDefaults = () => {
     setUsers(SEED_USERS);
-    setCurrentUserId('user-admin-isa');
+    setCurrentUserId('user-seeker-1');
     setListings(SEED_LISTINGS);
     setMedia(SEED_MEDIA);
     setUnlocks(SEED_UNLOCKS);

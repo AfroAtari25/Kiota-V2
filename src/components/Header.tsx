@@ -179,6 +179,7 @@ export const Header: React.FC = () => {
                     )}
                   </div>
 
+{import.meta.env.DEV && (
                   <div className="py-1">
                     <div className="px-3 py-1 text-[10px] font-bold text-[#8A8072] uppercase tracking-widest">
                       Switch Role & Persona
@@ -227,6 +228,7 @@ export const Header: React.FC = () => {
                       </button>
                     ))}
                   </div>
+)}
 
                   <div className="pt-2 border-t border-[#2B2620]/10 space-y-1.5">
                     {/* Role-Specific Portal Links */}
